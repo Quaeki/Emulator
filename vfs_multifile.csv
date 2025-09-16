@@ -1,0 +1,8 @@
+path,type,encoding,content
+app.cfg,file,utf8,key=value
+assets/images,dir,,
+assets/images/logo.bin,file,base64,AAECYmluYXJ5LWRhdGE=
+docs/readme.md,file,utf8,"# Readme
+Some text"
+bin/tool.sh,file,utf8,"#!/bin/sh
+echo tool"

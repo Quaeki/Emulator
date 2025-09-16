@@ -1,0 +1,3 @@
+vfs-info
+unknown_cmd
+ls

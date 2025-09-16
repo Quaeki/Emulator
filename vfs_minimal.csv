@@ -1,0 +1,5 @@
+path,type,encoding,content
+README.txt,file,utf8,This is a minimal VFS.
+docs,dir,,
+docs/guide.txt,file,utf8,"Line 1
+Line 2"
