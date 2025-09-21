@@ -1,0 +1,8 @@
+# ошибки аргументов
+touch
+chmod
+# плохой режим
+chmod 999 a/b/c/file.txt
+# несущ. путь
+chmod 644 no/such/file.txt
+touch a/bad/path/new.txt

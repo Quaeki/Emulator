@@ -1,0 +1,13 @@
+vfs-info
+pwd
+ls
+cd a/b/c
+ls -l
+touch new.txt
+ls -l
+chmod 600 new.txt
+ls -l
+cd ../../..
+chmod 755 a/b/c
+ls -l a/b
+date
