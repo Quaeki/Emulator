@@ -1,0 +1,3 @@
+cd no_such_dir
+tac a/b/c
+tac x/y/z/u/v/w.bin

@@ -1,0 +1,11 @@
+vfs-info
+pwd
+ls
+cd a/b/c
+pwd
+ls
+tac file.txt
+cd ../../..
+pwd
+ls a/b/c/file.txt
+date
