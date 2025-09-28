@@ -1,4 +1,3 @@
-
 import tkinter as tk
 from tkinter import ttk
 import getpass
@@ -8,6 +7,7 @@ import argparse
 import hashlib
 import csv
 import base64
+import re
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple, List
 from pathlib import Path
@@ -16,10 +16,10 @@ from datetime import datetime
 
 @dataclass
 class VFSNode:
-    kind: str
-    children: Dict[str, "VFSNode"] = field(default_factory=dict)  # for dirs
-    content: bytes = b""
-    mode: int = 0o000
+    kind: str                     # 'dir' | 'file'
+    children: Dict[str, "VFSNode"] = field(default_factory=dict)  # для dir
+    content: bytes = b""          # для file
+    mode: int = 0o000             # права доступа (восьмеричные)
     mtime: datetime = field(default_factory=lambda: datetime.now().astimezone())
 
     def is_dir(self) -> bool:
@@ -89,13 +89,10 @@ class VFS:
     def name(self) -> Optional[str]:
         return self._name
 
-    def resolve(self, cwd_parts: List[str], path: str) -> Tuple[List[str], Optional[VFSNode]]:
-        parts: List[str] = []
-        if path.startswith("/"):
-            parts = []
-        else:
-            parts = list(cwd_parts)
+    # ---------- Разрешение путей ----------
 
+    def resolve(self, cwd_parts: List[str], path: str) -> Tuple[List[str], Optional[VFSNode]]:
+        parts: List[str] = [] if path.startswith("/") else list(cwd_parts)
         for seg in path.split("/"):
             if seg in ("", "."):
                 continue
@@ -115,11 +112,7 @@ class VFS:
         return parts, node
 
     def resolve_parent(self, cwd_parts: List[str], path: str) -> Tuple[List[str], Optional[VFSNode], Optional[str]]:
-        parts: List[str] = []
-        if path.startswith("/"):
-            parts = []
-        else:
-            parts = list(cwd_parts)
+        parts: List[str] = [] if path.startswith("/") else list(cwd_parts)
         segs = [s for s in path.split("/") if s not in ("", ".")]
         if not segs:
             return parts, None, None
@@ -139,8 +132,10 @@ class VFS:
                 return parts, None, basename
         return parts, node, basename
 
-class ShellEmulatorGUI:
 
+# ---------------- GUI Shell Emulator ----------------
+
+class ShellEmulatorGUI:
     def __init__(self, root: tk.Tk, vfs_path: Optional[str], startup_script: Optional[str]):
         self.root = root
         self.vfs_path = vfs_path
@@ -155,6 +150,7 @@ class ShellEmulatorGUI:
         self.prompt = f"[{self.user}@{self.host}]$ "
         self.root.title(f"Эмулятор - [{self.user}@{self.host}]")
 
+        # UI
         self.text = tk.Text(root, wrap="word", font=("Courier New", 12), state="normal")
         self.scroll = ttk.Scrollbar(root, command=self.text.yview)
         self.text["yscrollcommand"] = self.scroll.set
@@ -177,11 +173,12 @@ class ShellEmulatorGUI:
         self._load_vfs_if_any()
 
         self.println("Добро пожаловать в эмулятор оболочки (Вариант №18, Этап 5).")
-        self.println("Команды: ls [-l] [path], cd <path>, date, tac <path>, vfs-info, pwd, touch <path>, chmod <mode> <path>, exit.")
+        self.println("Команды: ls [-l] [-a] [path], cd <path>, date, tac <path>, vfs-info, pwd, touch <path>, chmod [-R] <mode> <path>, exit.")
         self.println()
 
         if self.startup_script:
             self.root.after(100, self._run_startup_script_safe)
+
 
     def println(self, text: str = ""):
         self.text.insert("end", text + "\n")
@@ -203,38 +200,76 @@ class ShellEmulatorGUI:
         return tokens[0], tokens[1:], None
 
     @staticmethod
-    def _fmt_mode(node):
+    def _fmt_mode(node: VFSNode) -> str:
         kind_char = "d" if node.is_dir() else "-"
         return f"{kind_char}{node.mode:04o}"
 
-    # Commands
+
     def cmd_ls(self, args: List[str]) -> bool:
         long = False
-        target = "."
-        if args and args[0] == "-l":
-            long = True
-            args = args[1:]
-        if args:
-            target = args[0]
+        all_ = False
+        i = 0
+        while i < len(args) and args[i].startswith("-") and args[i] != "-":
+            flags = args[i][1:]
+            for ch in flags:
+                if ch == "l":
+                    long = True
+                elif ch == "a":
+                    all_ = True
+                else:
+                    self.println(f"ls: неизвестная опция '-{ch}'")
+                    return False
+            i += 1
+
+        target = args[i] if i < len(args) else "."
+
+        # Резолвим цель
         parts, node = self.vfs.resolve(self.cwd_parts, target)
         if node is None:
             self.println(f"ls: не удалось открыть '{target}': Нет такого файла или каталога")
             return False
-        if node.is_file():
+
+        # Печать одной записи
+        def print_entry(name: str, n: VFSNode):
             if long:
-                self.println(f"{self._fmt_mode(node)} {parts[-1]}")
+                self.println(f"{self._fmt_mode(n)} {name}")
             else:
-                self.println("/".join(parts[-1:]))
+                self.println(name)
+
+        if node.is_file():
+            name = parts[-1] if parts else target
+            print_entry(name, node)
             return True
+
         names = sorted(node.children.keys())
-        if not names:
-            return True
+
+        if not all_:
+            names = [n for n in names if not n.startswith(".")]
+
+        entries: List[Tuple[str, VFSNode]] = []
+        if all_:
+            entries.append((".", node))
+            if parts:
+                parent = self.vfs.root
+                for seg in parts[:-1]:
+                    parent = parent.children.get(seg)
+                    if parent is None:
+                        parent = node
+                        break
+                entries.append(("..", parent))
+            else:
+                entries.append(("..", node))
+
+        # Реальные дети
+        for name in names:
+            entries.append((name, node.children[name]))
+
         if long:
-            for name in names:
-                child = node.children[name]
+            for name, child in entries:
                 self.println(f"{self._fmt_mode(child)} {name}")
         else:
-            self.println("  ".join(names))
+            if entries:
+                self.println("  ".join(name for name, _ in entries))
         return True
 
     def cmd_cd(self, args: List[str]) -> bool:
@@ -254,6 +289,7 @@ class ShellEmulatorGUI:
         self.println(now.isoformat(timespec="seconds"))
         return True
 
+
     def cmd_tac(self, args: List[str]) -> bool:
         if len(args) != 1:
             self.println("tac: требуется ровно 1 аргумент: путь к файлу")
@@ -271,9 +307,15 @@ class ShellEmulatorGUI:
         except UnicodeDecodeError:
             self.println(f"tac: '{target}': невозможно декодировать как UTF-8")
             return False
-        for line in reversed(text.splitlines()):
-            self.println(line)
+
+        chunks = re.findall(r'.*?\n|.+\Z', text, flags=re.DOTALL)
+        for chunk in reversed(chunks):
+            if chunk.endswith("\n"):
+                self.println(chunk[:-1])
+            else:
+                self.println(chunk)
         return True
+
 
     def cmd_touch(self, args: List[str]) -> bool:
         if len(args) != 1:
@@ -294,22 +336,129 @@ class ShellEmulatorGUI:
         self.println(f"touch: создан пустой файл '{target}'")
         return True
 
+    def _chmod_apply_symbolic(self, cur_mode: int, clause: str, is_dir: bool) -> int:
+        i = 0
+        classes = ""
+        while i < len(clause) and clause[i] in "ugoa":
+            classes += clause[i]
+            i += 1
+        if not classes:
+            classes = "a"
+        if i >= len(clause) or clause[i] not in "+-=":
+            raise ValueError(f"неверный синтаксис chmod: '{clause}'")
+        op = clause[i]
+        i += 1
+        if i >= len(clause):
+            raise ValueError(f"неверный синтаксис chmod: '{clause}'")
+        perms = clause[i:]
+        if not all(c in "rwxX" for c in perms):
+            raise ValueError(f"неверные права в chmod: '{perms}'")
+
+        def bits_for(perms_local: str, cls_char: str) -> int:
+            shift = {"u": 6, "g": 3, "o": 0}[cls_char]
+            mask = 0
+            for ch in perms_local:
+                if ch == "r":
+                    mask |= (0o4 << shift)
+                elif ch == "w":
+                    mask |= (0o2 << shift)
+                elif ch == "x":
+                    mask |= (0o1 << shift)
+                elif ch == "X":
+                    exec_any = (cur_mode & 0o111) != 0
+                    if is_dir or exec_any:
+                        mask |= (0o1 << shift)
+            return mask
+
+        class_mask_all = 0
+        for cls in classes:
+            class_mask_all |= {
+                "u": 0o700,
+                "g": 0o070,
+                "o": 0o007,
+                "a": 0o777,
+            }[cls]
+
+        new_mode = cur_mode
+
+        if op == "=":
+            set_mask = 0
+            for cls in ("u", "g", "o"):
+                if ("a" in classes) or (cls in classes):
+                    set_mask |= bits_for(perms, cls)
+            new_mode = (new_mode & ~class_mask_all) | (set_mask & class_mask_all)
+        elif op == "+":
+            add_mask = 0
+            for cls in ("u", "g", "o"):
+                if ("a" in classes) or (cls in classes):
+                    add_mask |= bits_for(perms, cls)
+            new_mode |= add_mask
+        elif op == "-":
+            sub_mask = 0
+            for cls in ("u", "g", "o"):
+                if ("a" in classes) or (cls in classes):
+                    sub_mask |= bits_for(perms, cls)
+            new_mode &= ~sub_mask
+        else:
+            raise ValueError(f"неизвестная операция chmod: '{op}'")
+
+        new_mode &= 0o777
+        return new_mode
+
+    def _chmod_walk(self, node: VFSNode, recursive: bool):
+        """Итерация по узлу и (опц.) всем дочерним для -R."""
+        yield node
+        if recursive and node.is_dir():
+            for _, child in node.children.items():
+                yield from self._chmod_walk(child, True)
+
+
     def cmd_chmod(self, args: List[str]) -> bool:
-        if len(args) != 2:
-            self.println("chmod: требуется 2 аргумента: <octal_mode> <path>")
+        if not args:
+            self.println("chmod: требуется 2 аргумента: <mode> <path> (опционально -R перед mode)")
             return False
-        mode_str, target = args
-        if not (len(mode_str) in (3,4) and all(c in "01234567" for c in mode_str)):
-            self.println(f"chmod: неверный режим '{mode_str}' (ожидается восьмеричный, напр. 644 или 0755)")
+
+        recursive = False
+        i = 0
+        if args[0] == "-R":
+            recursive = True
+            i += 1
+        if len(args) - i != 2:
+            self.println("chmod: требуется 2 аргумента: <mode> <path>")
             return False
-        mode_val = int(mode_str, 8)
+
+        mode_spec = args[i]
+        target = args[i + 1]
+
         parts, node = self.vfs.resolve(self.cwd_parts, target)
         if node is None:
             self.println(f"chmod: не удалось применить к '{target}': Нет такого файла или каталога")
             return False
-        node.mode = mode_val
-        self.println(f"chmod: установлен {mode_val:04o} для '{target}'")
-        return True
+
+        is_numeric = (len(mode_spec) in (3, 4)) and all(c in "01234567" for c in mode_spec)
+
+        try:
+            if is_numeric:
+                mode_val = int(mode_spec, 8) & 0o777
+                for n in self._chmod_walk(node, recursive):
+                    n.mode = mode_val
+                self.println(f"chmod: установлен {mode_val:04o} для '{target}'" + (" (рекурсивно)" if recursive else ""))
+                return True
+            else:
+                clauses = [c.strip() for c in mode_spec.split(",") if c.strip()]
+                if not clauses:
+                    self.println(f"chmod: неверный режим '{mode_spec}'")
+                    return False
+                for n in self._chmod_walk(node, recursive):
+                    cur = n.mode
+                    for clause in clauses:
+                        cur = self._chmod_apply_symbolic(cur, clause, is_dir=n.is_dir())
+                    n.mode = cur & 0o777
+                self.println(f"chmod: применён символьный режим '{mode_spec}' для '{target}'" + (" (рекурсивно)" if recursive else ""))
+                return True
+        except ValueError as e:
+            self.println(f"chmod: {e}")
+            return False
 
     def exec(self, line: str) -> Tuple[bool, bool]:
         cmd, args, perr = self.parse_command_line(line)
