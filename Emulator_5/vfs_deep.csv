@@ -1,7 +1,7 @@
 path,type,encoding,content
 a/b/c,dir,,
-a/b/c/file.txt,file,utf8,"alpha
-beta
-gamma"
+a/b/c/file.txt,file,utf8,"alpha\n
+beta\n
+gamma\n"
 x/y/z/u/v/w.bin,file,base64,AAECYmluYXJ5LWRhdGE=
 root.txt,file,utf8,root

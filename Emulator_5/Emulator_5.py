@@ -289,7 +289,6 @@ class ShellEmulatorGUI:
         self.println(now.isoformat(timespec="seconds"))
         return True
 
-
     def cmd_tac(self, args: List[str]) -> bool:
         if len(args) != 1:
             self.println("tac: требуется ровно 1 аргумент: путь к файлу")
@@ -302,20 +301,27 @@ class ShellEmulatorGUI:
         if not node.is_file():
             self.println(f"tac: '{target}': это каталог")
             return False
+
         try:
             text = node.content.decode("utf-8")
         except UnicodeDecodeError:
             self.println(f"tac: '{target}': невозможно декодировать как UTF-8")
             return False
 
-        chunks = re.findall(r'.*?\n|.+\Z', text, flags=re.DOTALL)
+        chunks = re.findall(r'.*?(?:\r\n|\r|\n)|.+\Z', text, flags=re.DOTALL)
+
+        if len(chunks) <= 1 and "\\n" in text and "\n" not in text:
+            text = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+            chunks = re.findall(r'.*?(?:\r\n|\r|\n)|.+\Z', text, flags=re.DOTALL)
+
         for chunk in reversed(chunks):
-            if chunk.endswith("\n"):
+            if chunk.endswith("\r\n"):
+                self.println(chunk[:-2])
+            elif chunk.endswith("\n") or chunk.endswith("\r"):
                 self.println(chunk[:-1])
             else:
                 self.println(chunk)
         return True
-
 
     def cmd_touch(self, args: List[str]) -> bool:
         if len(args) != 1:

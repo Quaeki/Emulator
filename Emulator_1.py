@@ -104,8 +104,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-#ls "/path with spaces" foo → ls: args=['/path with spaces', 'foo']
-#cd → сообщение об ошибке (нужен 1 аргумент)
-#cd "/tmp/test" → cd: args=['/tmp/test']
-#unknown → ошибка «неизвестная команда»
-#exit → завершение приложения
